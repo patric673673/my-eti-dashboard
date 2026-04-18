@@ -62,82 +62,82 @@ st.sidebar.markdown("### 🔍 補漲掃描器設定")
 watchlist_input = st.sidebar.text_area("待掃描清單 (每行或逗點分隔)", value="AAPL, TSLA, META, AMD, 2330.TW, 0050.TW")
 benchmark = st.sidebar.text_input("⚖️ 比較基準大盤", value="^GSPC").strip().upper()
 
-# --- 主畫面分頁 (Tabs) ---
-tab1, tab2 = st.tabs(["🚀 ETI 波動率儀表板", "🔍 委屈補漲潛力掃描器"])
-
-with tab1:
-    # --- 數據抓取函數 ---
+# --- 數據抓取函數 ---
 @st.cache_data(ttl=3600)
 def get_market_data(ticker, days=90):
     df = yf.download(ticker, period=f"{days}d")
     return df
 
-# --- 計算邏輯 ---
-df_asset = get_market_data(target_asset)
-df_vix = get_market_data(vix_ticker)
+# --- 主畫面分頁 (Tabs) ---
+tab1, tab2 = st.tabs(["🚀 ETI 波動率儀表板", "🔍 委屈補漲潛力掃描器"])
 
-if df_asset.empty or df_vix.empty:
-    st.error(f"無法抓取數據（標的: {target_asset} 或 {vix_ticker}），請稍後再試。")
-    st.stop()
-
-# 1. 計算 RV (30日年化)
-returns = np.log(df_asset['Close'] / df_asset['Close'].shift(1))
-current_rv = float(returns.tail(30).std().iloc[0] if isinstance(returns.tail(30).std(), pd.Series) else returns.tail(30).std()) * np.sqrt(252) * 100
-current_iv = float(df_vix['Close'].iloc[-1].iloc[0] if isinstance(df_vix['Close'].iloc[-1], pd.Series) else df_vix['Close'].iloc[-1])
-rv_iv_ratio = current_rv / current_iv if current_iv else 0
-
-# 2. 計算 Z-Score (波動率倒掛程度)
-ratio_history = [] # 這裡簡化，實務上建議存入資料庫
-# 假設歷史平均 1.12, 標準差 0.1
-z_score = (rv_iv_ratio - 1.12) / 0.1 
-
-# --- 分數計算邏輯 (D1-D3) ---
-d1 = min(18, 12 + max(0, (rv_iv_ratio - 1.12) * 40))
-# 模擬 D2, D3 數據 (實務上需串接 CBOE/SpotGamma API)
-d2 = 15 if st.sidebar.checkbox("P/C Ratio > 1.07?", value=True) else 5
-d3 = 10 if st.sidebar.checkbox("IV 開始下降 (Vanna Squeeze)?", value=True) else 0
-
-total_eti = (d1 + d2 + d3 + d4_score)
-
-# --- 視覺化看板 ---
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("ETI 總分", f"{total_eti:.1f}", delta="Edge 強度")
-# 修正了原始程式碼中的 :.2pt 錯誤，改為 :.2f
-col2.metric("RV/IV 比率", f"{rv_iv_ratio:.2f}", delta=f"Z-Score: {z_score:.1f}")
-col3.metric("當前 RV", f"{current_rv:.1f}%")
-col4.metric("當前 IV", f"{current_iv:.1f}")
-
-# --- 儀表板圓盤圖 ---
-fig_gauge = go.Figure(go.Indicator(
-    mode = "gauge+number",
-    value = total_eti,
-    title = {'text': "交易訊號強度"},
-    gauge = {
-        'axis': {'range': [0, 100]},
-        'bar': {'color': "darkblue"},
-        'steps' : [
-            {'range': [0, 40], 'color': "red"},
-            {'range': [40, 60], 'color': "orange"},
-            {'range': [60, 80], 'color': "yellow"},
-            {'range': [80, 100], 'color': "green"}],
-        'threshold': {'line': {'color': "black", 'width': 4}, 'thickness': 0.75, 'value': 75}
-    }
-))
-st.plotly_chart(fig_gauge, use_container_width=True)
-
-# --- 趨勢圖表 ---
-st.subheader("波動率趨勢分析")
-fig_trend = go.Figure()
-
-# 為了防止 pandas 多重 index 報錯，將資料轉換成 1D array
-rv_series = returns.rolling(30).std() * np.sqrt(252) * 100
-rv_values = rv_series.iloc[:, 0].values if isinstance(rv_series, pd.DataFrame) else rv_series.values
-iv_values = df_vix['Close'].iloc[:, 0].values if isinstance(df_vix['Close'], pd.DataFrame) else df_vix['Close'].values
-
-fig_trend.add_trace(go.Scatter(x=df_asset.index, y=rv_values, name="RV (30D)"))
-fig_trend.add_trace(go.Scatter(x=df_vix.index, y=iv_values, name="IV (VIX)"))
-st.plotly_chart(fig_trend, use_container_width=True)
-
+with tab1:
+    # --- 計算邏輯 ---
+    df_asset = get_market_data(target_asset)
+    df_vix = get_market_data(vix_ticker)
+    
+    if df_asset.empty or df_vix.empty:
+        st.error(f"無法抓取數據（標的: {target_asset} 或 {vix_ticker}），請稍後再試。")
+        st.stop()
+    
+    # 1. 計算 RV (30日年化)
+    returns = np.log(df_asset['Close'] / df_asset['Close'].shift(1))
+    current_rv = float(returns.tail(30).std().iloc[0] if isinstance(returns.tail(30).std(), pd.Series) else returns.tail(30).std()) * np.sqrt(252) * 100
+    current_iv = float(df_vix['Close'].iloc[-1].iloc[0] if isinstance(df_vix['Close'].iloc[-1], pd.Series) else df_vix['Close'].iloc[-1])
+    rv_iv_ratio = current_rv / current_iv if current_iv else 0
+    
+    # 2. 計算 Z-Score (波動率倒掛程度)
+    ratio_history = [] # 這裡簡化，實務上建議存入資料庫
+    # 假設歷史平均 1.12, 標準差 0.1
+    z_score = (rv_iv_ratio - 1.12) / 0.1 
+    
+    # --- 分數計算邏輯 (D1-D3) ---
+    d1 = min(18, 12 + max(0, (rv_iv_ratio - 1.12) * 40))
+    # 模擬 D2, D3 數據 (實務上需串接 CBOE/SpotGamma API)
+    d2 = 15 if st.sidebar.checkbox("P/C Ratio > 1.07?", value=True) else 5
+    d3 = 10 if st.sidebar.checkbox("IV 開始下降 (Vanna Squeeze)?", value=True) else 0
+    
+    total_eti = (d1 + d2 + d3 + d4_score)
+    
+    # --- 視覺化看板 ---
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("ETI 總分", f"{total_eti:.1f}", delta="Edge 強度")
+    # 修正了原始程式碼中的 :.2pt 錯誤，改為 :.2f
+    col2.metric("RV/IV 比率", f"{rv_iv_ratio:.2f}", delta=f"Z-Score: {z_score:.1f}")
+    col3.metric("當前 RV", f"{current_rv:.1f}%")
+    col4.metric("當前 IV", f"{current_iv:.1f}")
+    
+    # --- 儀表板圓盤圖 ---
+    fig_gauge = go.Figure(go.Indicator(
+        mode = "gauge+number",
+        value = total_eti,
+        title = {'text': "交易訊號強度"},
+        gauge = {
+            'axis': {'range': [0, 100]},
+            'bar': {'color': "darkblue"},
+            'steps' : [
+                {'range': [0, 40], 'color': "red"},
+                {'range': [40, 60], 'color': "orange"},
+                {'range': [60, 80], 'color': "yellow"},
+                {'range': [80, 100], 'color': "green"}],
+            'threshold': {'line': {'color': "black", 'width': 4}, 'thickness': 0.75, 'value': 75}
+        }
+    ))
+    st.plotly_chart(fig_gauge, use_container_width=True)
+    
+    # --- 趨勢圖表 ---
+    st.subheader("波動率趨勢分析")
+    fig_trend = go.Figure()
+    
+    # 為了防止 pandas 多重 index 報錯，將資料轉換成 1D array
+    rv_series = returns.rolling(30).std() * np.sqrt(252) * 100
+    rv_values = rv_series.iloc[:, 0].values if isinstance(rv_series, pd.DataFrame) else rv_series.values
+    iv_values = df_vix['Close'].iloc[:, 0].values if isinstance(df_vix['Close'], pd.DataFrame) else df_vix['Close'].values
+    
+    fig_trend.add_trace(go.Scatter(x=df_asset.index, y=rv_values, name="RV (30D)"))
+    fig_trend.add_trace(go.Scatter(x=df_vix.index, y=iv_values, name="IV (VIX)"))
+    st.plotly_chart(fig_trend, use_container_width=True)
+    
     # --- 結論與建議 ---
     st.subheader("💡 專家系統建議")
     if total_eti >= 75:
