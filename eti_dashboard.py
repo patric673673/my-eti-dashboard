@@ -10,14 +10,29 @@ st.set_page_config(page_title="Edge Tracking Index (ETI)", layout="wide")
 st.title("🛡️ 市場微觀與定價錯誤預警儀表板 (ETI)")
 st.markdown("針對 SPX / 原油之量化 Edge 監控系統")
 
-# --- 側邊欄參數設定 ---
-st.sidebar.header("系統設定")
-# 提供自由輸入的欄位，預設為大盤指數
-target_asset = st.sidebar.text_input("🎯 追蹤標的代碼 (Yahoo Finance)", value="^GSPC").strip().upper()
+# 標的選擇模式
+preset_mode = st.sidebar.radio("標的選擇模式", ["內建預設組合", "手動自由輸入"])
 
-# 自動偵測：如果輸入原油，預設帶入原油恐慌指數，否則一律帶入 VIX 大盤恐慌指數
-default_vix = "^OVX" if target_asset == "CL=F" else "^VIX"
-vix_ticker = st.sidebar.text_input("📉 對應波動率指數 (IV)", value=default_vix).strip().upper()
+if preset_mode == "內建預設組合":
+    preset_option = st.sidebar.selectbox(
+        "📂 快速選單",
+        ["S&P 500 大盤 (^GSPC / ^VIX)", 
+         "納斯達克科技股 (QQQ / ^VXN)", 
+         "原油期貨 (CL=F / ^OVX)", 
+         "台積電與宏觀大盤 (2330.TW / ^VIX)"]
+    )
+    if preset_option == "S&P 500 大盤 (^GSPC / ^VIX)":
+        target_asset, vix_ticker = "^GSPC", "^VIX"
+    elif preset_option == "納斯達克科技股 (QQQ / ^VXN)":
+        target_asset, vix_ticker = "QQQ", "^VXN"
+    elif preset_option == "原油期貨 (CL=F / ^OVX)":
+        target_asset, vix_ticker = "CL=F", "^OVX"
+    elif preset_option == "台積電與宏觀大盤 (2330.TW / ^VIX)":
+        target_asset, vix_ticker = "2330.TW", "^VIX"
+else:
+    # 手動自由輸入
+    target_asset = st.sidebar.text_input("🎯 追蹤標的代碼 (Yahoo Finance)", value="QQQ").strip().upper()
+    vix_ticker = st.sidebar.text_input("📉 對應波動率指數 (IV)", value="^VXN").strip().upper()
 
 d4_score = st.sidebar.slider("D4 執行力分數 (本週)", 0, 25, 20)
 
@@ -42,7 +57,16 @@ with st.sidebar.expander("📖 指數與名詞百科", expanded=False):
       🔴 **<60 分**：無明顯優勢，回歸隨機，建議收手。
     """)
 
-# --- 數據抓取函數 ---
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🔍 補漲掃描器設定")
+watchlist_input = st.sidebar.text_area("待掃描清單 (每行或逗點分隔)", value="AAPL, TSLA, META, AMD, 2330.TW, 0050.TW")
+benchmark = st.sidebar.text_input("⚖️ 比較基準大盤", value="^GSPC").strip().upper()
+
+# --- 主畫面分頁 (Tabs) ---
+tab1, tab2 = st.tabs(["🚀 ETI 波動率儀表板", "🔍 委屈補漲潛力掃描器"])
+
+with tab1:
+    # --- 數據抓取函數 ---
 @st.cache_data(ttl=3600)
 def get_market_data(ticker, days=90):
     df = yf.download(ticker, period=f"{days}d")
@@ -114,11 +138,86 @@ fig_trend.add_trace(go.Scatter(x=df_asset.index, y=rv_values, name="RV (30D)"))
 fig_trend.add_trace(go.Scatter(x=df_vix.index, y=iv_values, name="IV (VIX)"))
 st.plotly_chart(fig_trend, use_container_width=True)
 
-# --- 結論與建議 ---
-st.subheader("💡 專家系統建議")
-if total_eti >= 75:
-    st.success("【該抱】市場出現嚴重定價錯誤（RV > IV），且情緒極端，適合堅守倉位或利用 Vanna Squeeze 加倉。")
-elif total_eti >= 60:
-    st.warning("【謹慎】具備一定 Edge，但須注意 Gamma Flip 價位壓力。")
-else:
-    st.error("【該收】Edge 已消失，市場回歸隨機波動，或執行力 D4 扣分過重，建議離場。")
+    # --- 結論與建議 ---
+    st.subheader("💡 專家系統建議")
+    if total_eti >= 75:
+        st.success("【該抱】市場出現嚴重定價錯誤（RV > IV），且情緒極端，適合堅守倉位或利用 Vanna Squeeze 加倉。")
+    elif total_eti >= 60:
+        st.warning("【謹慎】具備一定 Edge，但須注意 Gamma Flip 價位壓力。")
+    else:
+        st.error("【該收】Edge 已消失，市場回歸隨機波動，或執行力 D4 扣分過重，建議離場。")
+
+with tab2:
+    st.subheader("相對大盤補漲潛力掃描")
+    st.markdown("此功能計算個股相對於基準大盤 (如 `^GSPC`) 的價格走勢，抓出目前**極度跌深/未能跟漲 (價差 Z-Score < -1.5)** 且**短線動能開始轉折向上**的絕佳補漲機會。")
+    
+    if st.button("🚀 開始執行跨資產掃描"):
+        with st.spinner("正在與 Yahoo Finance 連線並分析數據，請稍候..."):
+            # 整理清單
+            raw_symbols = watchlist_input.replace(",", "\n").split("\n")
+            symbols = [s.strip().upper() for s in raw_symbols if s.strip()]
+            if benchmark not in symbols:
+                symbols.append(benchmark)
+            
+            df_all = yf.download(symbols, period="120d")
+            
+            # yfinance returns multi-index if multiple symbols
+            if isinstance(df_all.columns, pd.MultiIndex):
+                close_df = df_all['Close']
+            else:
+                # Fallback if only 1 symbol somehow
+                close_df = pd.DataFrame(df_all['Close'], columns=[symbols[0]])
+            
+            results = []
+            
+            for sym in symbols:
+                if sym == benchmark or sym not in close_df.columns:
+                    continue
+                
+                # 計算相對強弱比率 (RS Line)
+                rs_line = close_df[sym] / close_df[benchmark]
+                rs_line = rs_line.dropna()
+                if len(rs_line) < 30:
+                    continue
+                
+                # 計算 RS Line 的 20 日移動平均與 Z-Score
+                rs_mean = rs_line.rolling(20).mean()
+                rs_std = rs_line.rolling(20).std()
+                z_score = (rs_line - rs_mean) / rs_std
+                current_z = float(z_score.iloc[-1])
+                
+                # 計算相對強弱的短線 RSI (判斷是否已經有反彈跡象)
+                delta_rs = rs_line.diff()
+                gain_rs = (delta_rs.where(delta_rs > 0, 0)).rolling(window=14).mean()
+                loss_rs = (-delta_rs.where(delta_rs < 0, 0)).rolling(window=14).mean()
+                rs_ratio = gain_rs / loss_rs
+                rs_rsi = 100 - (100 / (1 + rs_ratio))
+                current_rs_rsi = float(rs_rsi.iloc[-1]) if not pd.isna(rs_rsi.iloc[-1]) else 50
+                
+                # 診斷補漲信號
+                signal = "⚪ 觀望 / 走勢一致"
+                if current_z <= -1.5 and current_rs_rsi > 40:
+                    signal = "🟢 強烈補漲起漲點"
+                elif current_z <= -1.0:
+                    signal = "🟡 委屈落後區 (醞釀中)"
+                elif current_z >= 1.5:
+                    signal = "🔴 漲幅過大 (小心回調)"
+                    
+                price_val = float(close_df[sym].iloc[-1]) if not pd.isna(close_df[sym].iloc[-1]) else 0
+                results.append({
+                    "標的": sym,
+                    "最新價格": f"{price_val:.2f}",
+                    "相對價差 (Z-Score)": current_z,
+                    "RS 動能反彈指標": current_rs_rsi,
+                    "當前診斷": signal
+                })
+                
+            if results:
+                res_df = pd.DataFrame(results).sort_values(by="相對價差 (Z-Score)")
+                st.dataframe(res_df.style.format({
+                    "相對價差 (Z-Score)": "{:.2f}",
+                    "RS 動能反彈指標": "{:.1f}"
+                }), use_container_width=True)
+                st.success("✅ 掃描完畢！如果看到🟢信號，請重點觀察該日K線是否已站穩支撐。")
+            else:
+                st.info("無法獲取資料，請確認股票代碼是否正確。")
