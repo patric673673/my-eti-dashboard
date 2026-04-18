@@ -12,8 +12,13 @@ st.markdown("針對 SPX / 原油之量化 Edge 監控系統")
 
 # --- 側邊欄參數設定 ---
 st.sidebar.header("系統設定")
-target_asset = st.sidebar.selectbox("追蹤標的", ["^GSPC", "CL=F", "NVDA"], index=0)
-vix_ticker = "^VIX" if target_asset == "^GSPC" else "^OVX" if target_asset == "CL=F" else "^VIX" # 原油則對應 ^OVX
+# 提供自由輸入的欄位，預設為大盤指數
+target_asset = st.sidebar.text_input("🎯 追蹤標的代碼 (Yahoo Finance)", value="^GSPC").strip().upper()
+
+# 自動偵測：如果輸入原油，預設帶入原油恐慌指數，否則一律帶入 VIX 大盤恐慌指數
+default_vix = "^OVX" if target_asset == "CL=F" else "^VIX"
+vix_ticker = st.sidebar.text_input("📉 對應波動率指數 (IV)", value=default_vix).strip().upper()
+
 d4_score = st.sidebar.slider("D4 執行力分數 (本週)", 0, 25, 20)
 
 # --- 側邊欄小百科 ---
